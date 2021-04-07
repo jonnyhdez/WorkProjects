@@ -1,0 +1,100 @@
+import pandas as pd
+import sys
+import os
+import pyodbc
+import datetime
+from datetime import date
+from datetime import timedelta
+import sys
+import os
+import os.path
+from easygui import *
+import datetime
+from datetime import date
+from datetime import timedelta
+import re
+import pyodbc
+import math
+import xlwt
+import xlrd
+from xlwt import Formula, easyxf
+from decimal import *
+import codecs
+
+sys.path.insert(0, '#:\\######')
+WORKDIR = "c:\\temp"
+DESKTOP = 'c:' + os.environ['HOMEPATH'] + "\Desktop"
+os.chdir(DESKTOP)
+
+
+
+def RevCheck(DSN,initials, addSQL1):
+
+    SQL = "SELECT Orders.OrderNumber, Orders.GrandTotal AS Grand, Orders.TaxTotal AS Tax,\
+    Orders.FinalGrandTotal, Orders.OrderDate, Orders.MarketName, Orders.Email, Orders.CartID \
+    FROM Orders WHERE  Orders.Cancelled = 0 and Orders.CartID != 12 and Orders.CartID != 2 and Orders.CartID != 14 %s;"% (addSQL1)
+    db = pyodbc.connect(("DSN={};UID=##########;PWD=1234").format(DSN))
+    df= pd.read_sql_query(SQL,db)
+
+
+    df2= df[['OrderNumber','MarketName','Grand','Tax','FinalGrandTotal']]
+    df2['contains Amazon'] = df['MarketName'].apply(lambda x: "True" if x == 'Amazon Seller Central - AU' or x == 'Amazon Seller Central - CA' or x == 'Amazon Seller Central - DE' or x == 'Amazon Seller Central - FR' or x == 'Amazon Seller Central - IT' or x == 'Amazon Seller Central - JP' or x == 'Amazon Seller Central - NL' else "False")
+
+    df2.loc[(df2['contains Amazon'] == "True"),'Revenue']=df2['FinalGrandTotal']
+    df2.loc[(df2['contains Amazon'] == "False"),'Revenue']=(df2['Grand']-df2['Tax'])
+
+    if df2.empty:
+        Output = "No information found. Make sure you selected the correct Database."
+    else:
+        ONumber = df2['OrderNumber'].to_string(index=False)
+        revNumber = df2['Revenue'].to_string(index=False)
+        Output = "Revenue for OrderNumber {} is ${}".format(ONumber, revNumber)
+
+
+    SearchAGAIN= "Look up Different OrderNumber?"
+    Outputbox = buttonbox(message=Output, choices=[SearchAGAIN, 'Quit Program'])
+    if Outputbox == "Quit Program":
+        textbox(text="PROGRAM STOPPED: Program has been cancelled")
+        sys.exit()
+
+    if Outputbox == SearchAGAIN:
+        Options()
+
+
+
+
+
+def Options():
+    Database = buttonbox("What Database is this Revenue Search for?", choices = ["##########", "##########", "###########"])
+
+    if Database == "###########":
+        DSN = "##############"
+        initials = "##"
+    elif Database == "#############":
+        DSN = "###############"
+        initials = "##"
+    elif Database == "###########":
+        DSN = "###############"
+        initials = "##"
+
+
+    addSQL1 = ""
+
+    # Select Order Number
+    Option = buttonbox(message="Select below:", choices=["Enter OrderNumber", 'Quit Program'])
+    if Option == "Quit Program":
+        textbox(text="PROGRAM STOPPED: Program has been cancelled")
+        sys.exit()
+
+    if Option == "Enter OrderNumber":
+        OrdNum = enterbox("Enter OrderNumber")
+        addSQL1 = " and Orders.OrderNumber = %s" % OrdNum
+        return RevCheck(DSN,initials,addSQL1)
+        if OrdNum == None:
+            textbox(text="PROGRAM STOPPED: No OrderNumber entered")
+            sys.exit()
+        ofn_opt = "Ord Num = {}".format(OrdNum)
+        OrderDetails = True
+
+
+Options()
