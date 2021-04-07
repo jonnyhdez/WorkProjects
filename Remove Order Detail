@@ -1,0 +1,248 @@
+# Program : Removal Order Detail Script                                                    #
+# Notes: This program selects SKUS that are in the Amazon Removal Detail                   #
+#        and edits the first number in the integer1 field of our database for each SKU.    #
+# Author : Jonathan Hernandez                                                              #
+# Date : 09/01/2020                                                                        #
+############################################################################################
+
+import boto.mws.connection
+import sys
+import os
+import pyodbc
+import time
+import shutil
+import datetime
+from datetime import date
+from datetime import timedelta
+import smtplib
+import mimetypes
+from email import encoders
+from email.message import Message
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+import email
+import imaplib
+import random
+import pandas as pd
+from easygui import *
+import os.path
+import csv
+from openpyxl import load_workbook
+import pandas as pd
+sys.path.insert(0, '##########')
+from ########## import *
+import xlrd
+from xlrd import open_workbook,xldate_as_tuple
+import base64
+import re
+
+
+
+# RETRIEVE AMAZON REMOVAL ORDER DETAIL REPORT SCRIPT
+
+now = date.today()
+#start_day = now - datetime.timedelta(days=30)
+#startdate = start_day.strftime("%Y-%m-%d")
+startdate = datetime.date(2020,07,01) #<- Use if you want to go back further then the preset 30 days above. Just enter start date.
+startdate = "{}T00:00:00.000-06".format(startdate)
+
+
+name = "Amazon Removal Order Detail"
+
+# SET DESKTOP AS WORKING DIRECTORY
+WORKDIR = "c:\\temp"
+DESKTOP = 'c:' + os.environ['HOMEPATH'] + "\Desktop"
+os.chdir(DESKTOP)
+
+
+Alphabet = ["A","B", "C", "D", "E", "F",
+"G", "H", "I", "J", "K", "L", "M", "N", "O", "P",
+"Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
+
+Numerics = ["1", "2", "3", "4", "5", "6", "7", "8",
+"9", "0","!", "@", "#", "$", "%", "^", "&", "*",
+"(", ")", "-", "_", "+", "=", "?", "~"]
+
+def CreateKey():
+    key = ""
+    for i in range(10):
+        # roll for Alpha or Numeric
+        Type = random.randrange(100)
+        Character = random.randrange(26)
+        if Type > 75:
+            key += Numerics[Character]
+        else:
+            Case = random.randrange(100)
+            if Case > 50:
+                key += Alphabet[Character]
+            else:
+                key += Alphabet[Character].lower()
+    return key
+
+KEY = CreateKey()
+
+
+def encode(key, clear):
+    enc = []
+    for i in range(len(clear)):
+        key_c = key[i % len(key)]
+        enc_c = chr((ord(clear[i]) + ord(key_c)) % 256)
+        enc.append(enc_c)
+    return base64.urlsafe_b64encode("".join(enc))
+
+def decode(key, enc):
+    dec = []
+    enc = base64.urlsafe_b64decode(enc)
+    for i in range(len(enc)):
+        key_c = key[i % len(key)]
+        dec_c = chr((256 + ord(enc[i]) - ord(key_c)) % 256)
+        dec.append(dec_c)
+    return "".join(dec)
+
+
+
+
+def Abort(AbortMsg):
+    toaddr = ["jonathan.hernandez@############.com"]
+    fromaddr = "###.####@#########.com"
+    msg = MIMEText(AbortMsg)
+    COMMASPACE = ', '
+    msg['Subject'] = 'Script %s Aborted' % name
+    msg['From'] = fromaddr
+    msg['To'] = COMMASPACE.join(toaddr)
+
+    server=smtplib.SMTP_SSL('smtp.gmail.com', 465)
+    server.login(fromaddr, '#########')
+    server.sendmail(fromaddr, toaddr, msg.as_string())
+    server.quit()
+
+
+
+# connect to MWS account
+def Connect():
+
+    conn = boto.mws.connection.MWSConnection(
+        aws_access_key_id='#####################',
+        aws_secret_access_key='#########################'
+    )
+
+    conn.SellerId = '#############'
+    conn.Merchant = '#############'
+    conn.MarketplaceId = '################'
+    conn.host = 'mws.amazonservices.com'
+
+    return conn
+
+
+
+# Connect to Amazon and Get REMOVAL ORDER DETAIL REPORT. Save report as a txt file onto the desktop.
+def GetROD(conn):
+
+    response = conn.request_report(ReportType='_GET_FBA_FULFILLMENT_REMOVAL_ORDER_DETAIL_DATA_', StartDate = startdate)
+    ReportRequestId = response.RequestReportResult.ReportRequestInfo.ReportRequestId
+
+    StayInLoop = True
+    while StayInLoop:
+        time.sleep(120)
+        List = conn.get_report_request_list()
+        for i in range(len(List.GetReportRequestListResult.ReportRequestInfo)):
+            if List.GetReportRequestListResult.ReportRequestInfo[i].ReportRequestId == ReportRequestId:
+                    Status = List.GetReportRequestListResult.ReportRequestInfo[i].ReportProcessingStatus
+                    if Status == "_DONE_":
+                        print Status
+                        GeneratedReportId = List.GetReportRequestListResult.ReportRequestInfo[i].GeneratedReportId
+                        Report = encode(KEY, conn.get_report(ReportId = GeneratedReportId))
+                        StayInLoop = False
+                        break
+                    elif Status == "_CANCELLED_":
+                        print Status
+                        Abort("{} Removal Order Detail Throttled".format())
+                        StayInLoop = False
+                        break
+                    elif Status == "_DONE_NO_DATA_":
+                        print Status
+                        StayInLoop = False
+                        break
+                    print Status
+
+    if Status == "_DONE_":
+        # create output file
+        out_file = open('RemovalOrderDetail.txt', "w")
+        Report = decode(KEY, Report)
+        RODreport = Report.split('\r\n')
+
+        for row in RODreport:
+            print >> out_file, row
+
+        out_file.close()
+
+
+
+# Read REMOVAL ORDER DETAIL. Extract Values we need to update in Stone Edge.
+def ReadROD():
+    df = pd.read_csv('RemovalOrderDetail.txt', sep="\t")
+    df.columns = df.columns.str.replace('sku', 'LocalSku')
+    sku = df['LocalSku']
+
+    DSN = '#########'
+    SEDB = pyodbc.connect("DSN={}sql;UID=##########;PWD=#####".format(DSN))
+    cursor = SEDB.cursor()
+    SQL = "SELECT Inventory.LocalSku, Inventory.Text3, Inventory.Integer1 FROM Inventory;"
+    df2 = pd.read_sql_query(SQL, SEDB)
+
+    df2= pd.merge(sku,df2, how = 'left')
+
+
+    SKU= df2['LocalSku'].values.tolist()
+    INTEGER1 = df2['Integer1'].values.tolist()
+
+
+    INTEGER1 = map(lambda x: '%.2f' % x, INTEGER1)
+
+    Templist= []
+    for i in INTEGER1:
+        if i == '0' or i == "":
+            i = str(2).zfill(3)
+            Templist.append(i)
+        elif i != 'nan' or i is not None:
+            i.split()
+            print(i[2])
+            print("------")
+            INTEGER1 = i[:2] + '3'
+            if INTEGER1 == 2 or INTEGER1 == 2.2:
+                INTEGER1 = str(2).zfill(3)
+            Templist.append(INTEGER1)
+            print(INTEGER1)
+    print("------------------------------")
+    INTEGER1 =Templist
+    INTEGER1 = [float(i) for i in INTEGER1]
+    INTEGER1= [int(i) for i in INTEGER1]
+    for x in INTEGER1:
+        print(type(x))
+        print(x)
+    return INTEGER1, SKU
+
+
+
+# Update Values in SE with values read in from REMOVAL ORDER DETAIL REPORT
+def UpdateROD(integer1, sku):
+    for i, s in zip(integer1,sku):
+            SQL2 = "UPDATE Inventory SET Integer1 = '%s' WHERE LocalSku = '%s';" % (i, s)
+            cursor.execute(SQL2)
+            cursor.execute("COMMIT")
+
+
+
+
+# MAIN
+# connect to an MWS account
+conn = Connect()
+# get shipped orders report
+GetROD(conn)
+# close the connection
+conn.close()
+# Read the Removal Order Detail Report Extract INTEGER1 VALUE AND SKU
+##INTEGER1, SKU= ReadROD()
+# Update Skus that appeared in the ROD Report in Stone Edge
+##UpdateROD(INTEGER1,SKU)
